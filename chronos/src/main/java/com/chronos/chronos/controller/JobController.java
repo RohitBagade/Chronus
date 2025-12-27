@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -21,6 +22,11 @@ public class JobController {
     @PostMapping
     public ResponseEntity<JobResponse> createJob(@Valid @RequestBody JobRequest request) {
         return ResponseEntity.ok(jobService.createJob(request));
+    }
+
+    @GetMapping
+    public List<JobResponse> getAllJobs() {
+        return jobService.getAllJobs();
     }
 
     @GetMapping("/{id}")

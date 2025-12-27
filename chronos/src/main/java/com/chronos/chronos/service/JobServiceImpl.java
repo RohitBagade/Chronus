@@ -8,6 +8,8 @@ import com.chronos.chronos.scheduler.JobSchedulerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class JobServiceImpl implements JobService {
 
@@ -37,6 +39,22 @@ public class JobServiceImpl implements JobService {
 
         return convertToResponse(saved);
     }
+
+    @Override
+    public List<JobResponse> getAllJobs() {
+        return jobRepository.findAll()
+                .stream()
+                .map(job -> JobResponse.builder()
+                        .jobId(job.getJobId())
+                        .jobType(job.getJobType())
+                        .command(job.getCommand())
+                        .scheduleTime(job.getScheduleTime())
+                        .status(job.getStatus())
+                        .filePath(job.getFilePath())
+                        .build())
+                .toList();
+    }
+
 
     @Override
     public JobResponse getJobById(Long id) {

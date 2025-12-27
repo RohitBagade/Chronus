@@ -1,84 +1,97 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
-import LogViewer from "./LogViewer";
 
-export default function JobList() {
+export default function JobList({ onViewLogs }) {
   const [jobs, setJobs] = useState([]);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [logContent, setLogContent] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const fetchJobs = async () => {
-    const res = await api.get("/jobs");
-    setJobs(res.data);
+    try {
+      const res = await api.get("/jobs");
+      setJobs(res.data);
+    } catch (err) {
+      console.error("Failed to fetch jobs", err);
+      alert("Failed to load jobs");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const fetchLogs = async (id) => {
-    const res = await api.get(`/jobs/${id}/logs/content`);
-    setLogContent(res.data);
-  };
-
-  const executeJob = async (id) => {
-    await api.post(`/test/jobs/${id}/execute`);
-    alert(`Job ${id} executed manually.`);
-    fetchJobs();
+  const executeJob = async (jobId) => {
+    try {
+      await api.post(`/test/jobs/${jobId}/execute`);
+      alert(`Job ${jobId} triggered`);
+      fetchJobs();
+    } catch (err) {
+      alert("Job execution failed");
+    }
   };
 
   useEffect(() => {
     fetchJobs();
   }, []);
 
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Chronos Job Dashboard</h1>
-      <table className="min-w-full border">
-        <thead>
-          <tr className="bg-gray-100 text-left">
-            <th className="p-2">Job ID</th>
-            <th className="p-2">Type</th>
-            <th className="p-2">Command</th>
-            <th className="p-2">Schedule</th>
-            <th className="p-2">Status</th>
-            <th className="p-2 text-center">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map((job) => (
-            <tr key={job.jobId} className="border-b hover:bg-gray-50">
-              <td className="p-2">{job.jobId}</td>
-              <td className="p-2">{job.jobType}</td>
-              <td className="p-2">{job.command}</td>
-              <td className="p-2">{job.scheduleTime}</td>
-              <td
-                className={`p-2 ${
-                  job.status === "success"
-                    ? "text-green-600"
-                    : job.status === "failure"
-                    ? "text-red-600"
-                    : "text-gray-600"
-                }`}
-              >
-                {job.status}
-              </td>
-              <td className="p-2 text-center space-x-2">
-                <button
-                  onClick={() => executeJob(job.jobId)}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
-                >
-                  Run
-                </button>
-                <button
-                  onClick={() => fetchLogs(job.jobId)}
-                  className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded"
-                >
-                  View Logs
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+  if (loading) return <p>Loading jobs...</p>;
 
-      {logContent && <LogViewer content={logContent} onClose={() => setLogContent("")} />}
-    </div>
+  return (
+    <table border="1" cellPadding="8" width="100%">
+      <thead>
+        <tr>
+          <th>Job ID</th>
+          <th>Type</th>
+          <th>Command</th>
+          <th>Schedule</th>
+          <th>File</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {jobs.length === 0 && (
+          <tr>
+            <td colSpan="7" align="center">No jobs found</td>
+          </tr>
+        )}
+
+        {jobs.map(job => (
+          <tr key={job.jobId}>
+            <td>{job.jobId}</td>
+            <td>{job.jobType}</td>
+            <td>{job.command}</td>
+            <td>{formatDate(job.scheduleTime)}</td>
+            <td>{renderFile(job)}</td>
+            <td>{renderStatus(job.status)}</td>
+            <td>
+              {job.command === "run_java_code" && (
+                <button onClick={() => executeJob(job.jobId)}>Run</button>
+              )}
+              <button onClick={() => onViewLogs(job.jobId)}>Logs</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
+}
+
+/* ---------- helpers ---------- */
+
+function formatDate(dateTime) {
+  if (!dateTime) return "-";
+  return dateTime.replace("T", " ").substring(0, 16);
+}
+
+function renderFile(job) {
+  if (!job.filePath) return "-";
+  return job.filePath.split("/").pop();
+}
+
+function renderStatus(status) {
+  const color =
+    status === "SUCCESS" ? "green" :
+    status === "FAILED" ? "red" :
+    "orange";
+
+  return <span style={{ color }}>{status}</span>;
 }

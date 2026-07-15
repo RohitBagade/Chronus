@@ -1,0 +1,8 @@
+target
+.idea
+*.iml
+job-logs
+uploads
+src/test
+Chronos.docx
+*.md

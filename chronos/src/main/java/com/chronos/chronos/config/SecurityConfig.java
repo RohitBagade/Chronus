@@ -43,7 +43,7 @@ public class SecurityConfig {
                         (request, response, ex) -> response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized")))
                 .authorizeHttpRequests(auth -> auth
                         // Only signup/login are public; /auth/me needs a valid token.
-                        .requestMatchers("/auth/signup", "/auth/login", "/h2-console/**", "/error").permitAll()
+                        .requestMatchers("/health", "/auth/signup", "/auth/login", "/h2-console/**", "/error").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

@@ -1,0 +1,29 @@
+app = "chronos-scheduler-api"
+primary_region = "bom"
+
+[build]
+
+[env]
+  SPRING_PROFILES_ACTIVE = "dev"
+  # Demo runs on in-memory H2; hide the H2 web console publicly.
+  SPRING_H2_CONSOLE_ENABLED = "false"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep one machine warm so the in-memory H2 data + Quartz schedule persist.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "25s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"

@@ -4,7 +4,15 @@ A backend-focused job scheduling platform: submit one-time or recurring jobs ove
 Chronus runs them, retries failures with exponential backoff, and keeps an immutable execution log —
 all behind JWT auth with role-based access. Spring Boot + Quartz backend, React dashboard.
 
-> **Runs with zero setup.** `./mvnw spring-boot:run -Dspring-boot.run.profiles=dev` boots the whole
+### 🔗 Live demo
+| Surface | URL |
+|---|---|
+| **Dashboard** | https://chronos-ui-gold.vercel.app — admin `admin@chronos.dev` / `admin12345` |
+| **API** | https://chronos-scheduler-api.fly.dev — `/health`, `/auth/login`, `/jobs` |
+
+> Demo runs on in-memory H2 (data resets on redeploy). Submit a `fail` job dated in the past and watch it retry with backoff.
+
+> **Runs with zero setup locally too.** `./mvnw spring-boot:run -Dspring-boot.run.profiles=dev` boots the whole
 > backend on an in-memory H2 database with an in-memory scheduler — no MySQL, no Kafka, nothing to install.
 
 ## Why this project

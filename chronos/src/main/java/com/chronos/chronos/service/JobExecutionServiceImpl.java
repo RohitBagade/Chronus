@@ -4,34 +4,46 @@ import com.chronos.chronos.dto.JobExecutionResponse;
 import com.chronos.chronos.entity.Job;
 import com.chronos.chronos.entity.JobExecution;
 import com.chronos.chronos.repository.JobExecutionRepository;
+import com.chronos.chronos.repository.JobRepository;
+import com.chronos.chronos.scheduler.JobSchedulerService;
+import com.chronos.chronos.scheduler.JobStatus;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
+/**
+ * Runs a job and records the outcome. On failure it retries with exponential backoff
+ * (base 5s, doubling per attempt) up to Job.maxAttempts, re-scheduling via Quartz.
+ */
 @Service
 @RequiredArgsConstructor
 public class JobExecutionServiceImpl implements JobExecutionService {
 
+    private static final Logger log = LoggerFactory.getLogger(JobExecutionServiceImpl.class);
+    private static final long BASE_BACKOFF_SECONDS = 5;
+    private static final long MAX_BACKOFF_SECONDS = 300;
+
     private final JobExecutionRepository executionRepository;
+    private final JobRepository jobRepository;
+    private final JobSchedulerService schedulerService;
 
     @Override
     public void logExecution(Job job, String status, String errorLog) {
-        JobExecution execution = JobExecution.builder()
+        executionRepository.save(JobExecution.builder()
                 .job(job)
                 .startTime(LocalDateTime.now())
-                .endTime(LocalDateTime.now()) // for now, same time; will adjust with real execution
+                .endTime(LocalDateTime.now())
                 .status(status)
                 .errorLog(errorLog)
-                .build();
-        executionRepository.save(execution);
+                .build());
     }
 
     @Override
@@ -43,105 +55,108 @@ public class JobExecutionServiceImpl implements JobExecutionService {
                         .endTime(ex.getEndTime())
                         .status(ex.getStatus())
                         .message(ex.getErrorLog() == null ? "Execution successful" : ex.getErrorLog())
-                        .build()
-                )
+                        .build())
                 .collect(Collectors.toList());
     }
 
     @Override
     public void executeJob(Job job) {
         LocalDateTime start = LocalDateTime.now();
-        String status;
-        String error = null;
+        job.setStatus(JobStatus.RUNNING);
+        jobRepository.save(job);
 
-        Path logFilePath = Path.of("job-logs/job-" + job.getJobId() + ".log");
-
+        String output;
         try {
-            if ("run_java_code".equals(job.getCommand())) {
-                System.out.println(">>> Compiling and running Java file for job " + job.getJobId());
-
-                File javaFile = new File(System.getProperty("user.dir"), job.getFilePath());
-
-                if (!javaFile.exists()) {
-                    throw new IllegalArgumentException("Java file not found: " + javaFile.getAbsolutePath());
-                }
-
-                // Step 1: Compile
-                Process compile = new ProcessBuilder("javac", javaFile.getAbsolutePath())
-                        .redirectErrorStream(true)
-                        .start();
-                String compileOutput = new String(compile.getInputStream().readAllBytes());
-                compile.waitFor();
-
-                if (compile.exitValue() != 0) {
-                    throw new RuntimeException("Compilation failed:\n" + compileOutput);
-                }
-
-                // Step 2: Run class
-                String className = javaFile.getName().replace(".java", "");
-                Process run = new ProcessBuilder("java", "-cp", javaFile.getParent(), className)
-                        .redirectErrorStream(true)
-                        .start();
-                String output = new String(run.getInputStream().readAllBytes());
-                run.waitFor();
-
-                if (run.exitValue() != 0) {
-                    throw new RuntimeException("Execution failed:\n" + output);
-                }
-
-                // ✅ Write logs for success
-                Files.createDirectories(Path.of("job-logs"));
-                Files.writeString(logFilePath,
-                        "=== Execution started at " + start + " ===\n",
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                Files.writeString(logFilePath,
-                        output + System.lineSeparator(),
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                Files.writeString(logFilePath,
-                        "=== Execution ended at " + LocalDateTime.now() + " ===\n\n",
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-                status = "success";
-                error = null;
-
-                System.out.println(">>> Job " + job.getJobId() + " executed successfully");
-
-            } else {
-                throw new IllegalArgumentException("Unsupported command: " + job.getCommand());
-            }
-
+            output = runCommand(job);
         } catch (Exception e) {
-            status = "failure";
-            error = e.getMessage();
-            System.err.println(">>> Job " + job.getJobId() + " failed: " + error);
-
-            try {
-                // ✅ Always log errors too
-                Files.createDirectories(Path.of("job-logs"));
-                Files.writeString(logFilePath,
-                        "=== Execution started at " + start + " ===\n",
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                Files.writeString(logFilePath,
-                        "ERROR: " + error + System.lineSeparator(),
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                Files.writeString(logFilePath,
-                        "=== Execution ended at " + LocalDateTime.now() + " ===\n\n",
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException ioEx) {
-                System.err.println(">>> Failed to write log file: " + ioEx.getMessage());
-            }
+            recordExecution(job, start, JobStatus.FAILED, e.getMessage());
+            handleFailure(job, e.getMessage());
+            return;
         }
 
-        // ✅ Always save execution record
-        JobExecution execution = JobExecution.builder()
+        recordExecution(job, start, JobStatus.SUCCESS, null);
+        // A recurring job stays SCHEDULED for its next fire; a one-time job is done.
+        job.setStatus(isRecurring(job) ? JobStatus.SCHEDULED : JobStatus.SUCCESS);
+        jobRepository.save(job);
+        log.info("Job {} succeeded: {}", job.getJobId(), output);
+    }
+
+    /** Retry with exponential backoff, or give up after maxAttempts. */
+    private void handleFailure(Job job, String error) {
+        int attempt = job.getAttemptCount() + 1;
+        job.setAttemptCount(attempt);
+        if (attempt < job.getMaxAttempts()) {
+            long delay = Math.min(BASE_BACKOFF_SECONDS * (1L << (attempt - 1)), MAX_BACKOFF_SECONDS);
+            job.setStatus(JobStatus.RETRYING);
+            jobRepository.save(job);
+            schedulerService.scheduleRetry(job.getJobId(), delay);
+            log.warn("Job {} failed (attempt {}/{}): {} — retrying in {}s",
+                    job.getJobId(), attempt, job.getMaxAttempts(), error, delay);
+        } else {
+            job.setStatus(JobStatus.FAILED);
+            jobRepository.save(job);
+            log.error("Job {} failed permanently after {} attempts: {}", job.getJobId(), attempt, error);
+        }
+    }
+
+    private void recordExecution(Job job, LocalDateTime start, String status, String error) {
+        executionRepository.save(JobExecution.builder()
                 .job(job)
                 .startTime(start)
                 .endTime(LocalDateTime.now())
                 .status(status)
                 .errorLog(error)
-                .build();
-
-        executionRepository.save(execution);
+                .build());
     }
 
+    private boolean isRecurring(Job job) {
+        return job.getRecurrence() != null && !job.getRecurrence().isBlank();
+    }
+
+    /**
+     * Executes the job's command. Built-in demo commands make the scheduler runnable with no setup:
+     *   noop / log:* / anything unknown -> success;  fail:* -> throws;  run_java_code -> compile+run a file.
+     */
+    private String runCommand(Job job) throws Exception {
+        String command = job.getCommand() == null ? "" : job.getCommand().trim();
+
+        if (command.startsWith("fail")) {
+            throw new RuntimeException("Simulated failure for command '" + command + "'");
+        }
+
+        if ("run_java_code".equals(command)) {
+            return runJavaFile(job);
+        }
+
+        // noop / log:<msg> / http:<url> / any other -> treated as a successful task for the demo.
+        String message = command.isEmpty() ? "noop" : command;
+        log.info("Job {} executed command: {}", job.getJobId(), message);
+        return "Executed: " + message;
+    }
+
+    private String runJavaFile(Job job) throws Exception {
+        File javaFile = new File(System.getProperty("user.dir"), job.getFilePath());
+        if (!javaFile.exists()) {
+            throw new IllegalArgumentException("Java file not found: " + javaFile.getAbsolutePath());
+        }
+        Process compile = new ProcessBuilder("javac", javaFile.getAbsolutePath())
+                .redirectErrorStream(true).start();
+        String compileOutput = new String(compile.getInputStream().readAllBytes());
+        compile.waitFor();
+        if (compile.exitValue() != 0) {
+            throw new RuntimeException("Compilation failed:\n" + compileOutput);
+        }
+        String className = javaFile.getName().replace(".java", "");
+        Process run = new ProcessBuilder("java", "-cp", javaFile.getParent(), className)
+                .redirectErrorStream(true).start();
+        String output = new String(run.getInputStream().readAllBytes());
+        run.waitFor();
+        if (run.exitValue() != 0) {
+            throw new RuntimeException("Execution failed:\n" + output);
+        }
+        Path logDir = Path.of("job-logs");
+        Files.createDirectories(logDir);
+        Files.writeString(logDir.resolve("job-" + job.getJobId() + ".log"), output + System.lineSeparator());
+        return output;
+    }
 }

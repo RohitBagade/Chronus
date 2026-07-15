@@ -19,4 +19,6 @@ public class JobResponse {
     private String recurrence;
     private String status;
     private String filePath;
+    private int attemptCount;
+    private int maxAttempts;
 }

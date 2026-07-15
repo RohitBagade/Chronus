@@ -25,4 +25,10 @@ public class Job {
     private String recurrence;
     private String status;
     private String filePath;
+
+    // Retry bookkeeping — drives exponential-backoff re-scheduling on failure.
+    @Builder.Default
+    private int attemptCount = 0;
+    @Builder.Default
+    private int maxAttempts = 3;
 }

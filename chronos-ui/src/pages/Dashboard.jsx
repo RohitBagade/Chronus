@@ -1,70 +1,70 @@
-import React, { useEffect, useState } from 'react'
-import JobList from '../components/JobList'
-import JobDetailsModal from '../components/JobDetailsModal'
-import LogViewer from '../components/LogViewer'
-import UploadJobForm from '../components/UploadJobForm'
-import * as api from '../services/api'
+import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
+import JobForm from "../components/JobForm";
+import JobsTable from "../components/JobsTable";
+import JobDetail from "../components/JobDetail";
+import Notifications from "../components/Notifications";
 
 export default function Dashboard() {
-  const [jobs, setJobs] = useState([])
-  const [selectedJob, setSelectedJob] = useState(null)
-  const [showDetails, setShowDetails] = useState(false)
-  const [showLogs, setShowLogs] = useState(false)
-  const [logs, setLogs] = useState('')
+  const { user, logout } = useAuth();
+  const [jobs, setJobs] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [error, setError] = useState("");
 
-  const loadJobs = async () => {
+  const refresh = useCallback(async () => {
     try {
-      const data = await api.getJobs()
-      setJobs(data || [])
+      setJobs(await api.listJobs());
+      setError("");
     } catch (e) {
-      console.error('Failed to load jobs', e)
+      // token expired / backend down -> bounce to login
+      if (e?.response?.status === 401) logout();
+      else setError("Can't reach the scheduler API.");
     }
-  }
+  }, [logout]);
 
   useEffect(() => {
-    loadJobs()
-  }, [])
+    refresh();
+    const t = setInterval(refresh, 3000); // live polling
+    return () => clearInterval(t);
+  }, [refresh]);
 
-  const handleSelect = (job) => {
-    setSelectedJob(job)
-    setShowDetails(true)
-  }
-
-  const handleViewLogs = async (job) => {
-    setSelectedJob(job)
-    setShowLogs(true)
-    try {
-      const text = await api.getJobLogs(job.id)
-      setLogs(text)
-    } catch (e) {
-      setLogs('Failed to load logs')
-    }
-  }
-
-  const handleUpload = async (formData) => {
-    await api.uploadJob(formData)
-    await loadJobs()
-  }
+  const cancel = async (id) => { await api.cancelJob(id); refresh(); };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-5xl mx-auto grid grid-cols-3 gap-4">
-        <div className="col-span-2">
-          <JobList jobs={jobs} onSelect={handleSelect} onViewLogs={handleViewLogs} />
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-5 py-3.5">
+          <svg viewBox="0 0 32 32" className="size-6">
+            <circle cx="16" cy="16" r="13" fill="none" stroke="#22d3ee" strokeWidth="2.5" />
+            <path d="M16 8v8l5 3" fill="none" stroke="#22d3ee" strokeWidth="2.5" strokeLinecap="round" />
+          </svg>
+          <span className="font-mono text-lg font-bold tracking-tight">Chronos</span>
+          <span className="hidden rounded-full border border-line px-2 py-0.5 text-xs text-muted sm:inline">scheduler</span>
+          <div className="ml-auto flex items-center gap-3 text-sm">
+            <span className="text-muted">{user?.email}</span>
+            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">{user?.role}</span>
+            <button onClick={logout} className="rounded-lg border border-line px-3 py-1.5 text-muted transition hover:border-err/50 hover:text-err">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto grid max-w-6xl gap-5 px-5 py-6 lg:grid-cols-[320px_1fr]">
+        <div className="space-y-5">
+          <JobForm onCreated={refresh} />
+          <Notifications jobs={jobs} onSelect={setSelected} />
         </div>
         <div>
-          <UploadJobForm onUpload={handleUpload} />
+          {error && <p className="mb-3 rounded-lg border border-err/30 bg-err/10 px-3 py-2 text-sm text-err">{error}</p>}
+          <JobsTable jobs={jobs} onSelect={setSelected} onCancel={cancel} />
         </div>
-      </div>
+      </main>
 
-      <JobDetailsModal
-        show={showDetails}
-        job={selectedJob}
-        onClose={() => setShowDetails(false)}
-      />
-
-      <LogViewer show={showLogs} logs={logs} onClose={() => setShowLogs(false)} />
+      {selected && (
+        <JobDetail jobId={selected} onClose={() => setSelected(null)} onChanged={refresh} />
+      )}
     </div>
-  )
+  );
 }
-

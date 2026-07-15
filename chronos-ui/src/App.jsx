@@ -1,20 +1,8 @@
-import { useState } from "react";
-import JobList from "./components/JobList";
-import LogViewer from "./components/LogViewer";
+import { useAuth } from "./context/AuthContext";
+import Login from "./components/Login";
+import Dashboard from "./pages/Dashboard";
 
 export default function App() {
-  const [selectedJob, setSelectedJob] = useState(null);
-
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>Chronos Job Dashboard</h1>
-
-      <JobList onViewLogs={setSelectedJob} />
-
-      <LogViewer
-        jobId={selectedJob}
-        onClose={() => setSelectedJob(null)}
-      />
-    </div>
-  );
+  const { token } = useAuth();
+  return token ? <Dashboard /> : <Login />;
 }

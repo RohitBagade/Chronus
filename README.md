@@ -70,8 +70,16 @@ runs a **persistent Quartz JDBC store** on MySQL so triggers survive restarts an
 | DELETE | `/jobs/{id}` | token | Cancel (keeps audit trail) |
 | GET | `/jobs/{id}/logs` | token | Execution history |
 
-Demo commands (no setup): `noop` / `log:<msg>` succeed, `fail` throws (to watch retries),
-`run_java_code` compiles + runs an uploaded `.java` file.
+### Job types (routed by command prefix)
+| Command | What it does |
+|---|---|
+| `http:<url>` | HTTP GET the URL; non-2xx = failure (→ retry). **SSRF-guarded** — refuses localhost/private/link-local/`.internal` hosts. |
+| `shell:<cmd>` | Runs a shell command (30s timeout, non-zero exit = failure). **Gated** behind `chronos.jobs.shell-enabled` (default `false`) — arbitrary code execution isn't exposed on the public demo. |
+| `run_java_code` | Compiles + runs an uploaded `.java` file. |
+| `noop` / `log:<msg>` | Succeed (demo). |
+| `fail` | Throws — to watch retry/backoff. |
+
+Adding a job type is one `switch`-style branch in `JobExecutionServiceImpl.runCommand()`; the scheduling, retry, and audit layers around it are unchanged.
 
 ## Run it
 

@@ -8,9 +8,11 @@ function inMinutes(n) {
 }
 
 const COMMANDS = [
-  { value: "noop", label: "noop — succeeds instantly" },
-  { value: "log:hello", label: "log:hello — logs a message" },
-  { value: "fail", label: "fail — always fails (watch retries)" },
+  { value: "noop", label: "succeeds instantly" },
+  { value: "log:hello", label: "logs a message" },
+  { value: "fail", label: "always fails (watch retries)" },
+  { value: "http:https://httpbin.org/status/200", label: "HTTP GET a URL" },
+  { value: "shell:echo hello", label: "shell (disabled on public demo)" },
 ];
 
 export default function JobForm({ onCreated }) {
@@ -54,9 +56,17 @@ export default function JobForm({ onCreated }) {
         <input value={form.jobType} onChange={set("jobType")} className={input} />
       </Label>
       <Label text="Command">
-        <select value={form.command} onChange={set("command")} className={input}>
+        <input
+          list="cmd-presets"
+          value={form.command}
+          onChange={set("command")}
+          placeholder="noop · http:<url> · shell:<cmd>"
+          className={input}
+        />
+        <datalist id="cmd-presets">
           {COMMANDS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
+        </datalist>
+        <span className="mt-1 block text-[11px] text-muted">Type any command — http:&lt;url&gt; and shell:&lt;cmd&gt; are real runners.</span>
       </Label>
       <div className="grid grid-cols-2 gap-3">
         <Label text="Run at">
